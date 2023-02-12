@@ -12,27 +12,27 @@ use std::{
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Naive benchmark
-    // let dict_string = std::fs::read_to_string("wordlist.txt")?;
-    // let word_list: Vec<&str> = dict_string.lines().collect();
+    let dict_string = std::fs::read_to_string("wordlist.txt")?;
+    let word_list: Vec<&str> = dict_string.lines().collect();
 
-    // let mut guesses = vec![];
-    // let now = Instant::now();
-    // for _ in 0..200 {
-    //     let mut hm = Hangman::with_words(&word_list, 5_usize);
-    //     guesses.push(hm.find_best_guess());
-    //     let _ = hm.add_clue(Clue::new('s', LetterConstraint::NotInWord));
-    //     guesses.push(hm.find_best_guess());
-    //     let _ = hm.add_clue(Clue::new('t', LetterConstraint::NotInWord));
-    //     guesses.push(hm.find_best_guess());
-    //     let _ = hm.add_clue(Clue::new('a', LetterConstraint::AtPositions(vec![1, 3])));
-    //     guesses.push(hm.find_best_guess());
-    //     let _ = hm.add_clue(Clue::new('u', LetterConstraint::NotInWord));
-    //     guesses.push(hm.find_best_guess());
-    //     let _ = hm.add_clue(Clue::new('b', LetterConstraint::AtPositions(vec![0])));
-    //     guesses.push(hm.find_best_guess());
-    // }
+    let mut guesses = vec![];
+    let now = Instant::now();
+    for _ in 0..200 {
+        let mut hm = Hangman::with_words(&word_list, 5_usize);
+        guesses.push(hm.find_best_guess());
+        let _ = hm.add_clue(Clue::new('s', vec![]));
+        guesses.push(hm.find_best_guess());
+        let _ = hm.add_clue(Clue::new('t', vec![]));
+        guesses.push(hm.find_best_guess());
+        let _ = hm.add_clue(Clue::new('a', vec![1, 3]));
+        guesses.push(hm.find_best_guess());
+        let _ = hm.add_clue(Clue::new('u', vec![]));
+        guesses.push(hm.find_best_guess());
+        let _ = hm.add_clue(Clue::new('b', vec![0]));
+        guesses.push(hm.find_best_guess());
+    }
 
-    // println!("{guesses:?}, {:?}", now.elapsed());
+    println!("{guesses:?}, {:?}", now.elapsed());
 
     let mut uin = std::io::stdin();
     println!("Hur långt är ditt ord?");
@@ -48,18 +48,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         if let Some(guess) = guess {
             println!("Innehåller ditt ord bosktaven \"{}\"? (y/n)", guess);
             let word_has_letter = read_bool(&mut uin)?;
-            if !word_has_letter {
-                hm.add_clue(Clue::new(guess, LetterConstraint::NotInWord))
-                    .unwrap();
+            let positions = if !word_has_letter {
+                vec![]
             } else {
                 println!("På vilka positioner? (0,1, 2 ...)");
-                let positions: Vec<usize> = read_nums(&mut uin)
+                read_nums(&mut uin)
                     .unwrap()
                     .into_iter()
                     .map(|v| v as usize)
-                    .collect();
-                hm.add_clue(Clue::new(guess, LetterConstraint::AtPositions(positions)));
-            }
+                    .collect()
+            };
+            hm.add_clue(Clue::new(guess, positions)).unwrap();
         } else {
             todo!("Handle this later");
         }
@@ -117,21 +116,16 @@ struct Hangman {
 
 struct Clue {
     letter: char,
-    constraint: LetterConstraint,
+    at_positions: Vec<usize>,
 }
 
 impl Clue {
-    pub fn new(letter: char, constraint: LetterConstraint) -> Self {
+    pub fn new(letter: char, at_positions: Vec<usize>) -> Self {
         Self {
             letter: letter.to_ascii_lowercase(),
-            constraint,
+            at_positions,
         }
     }
-}
-
-enum LetterConstraint {
-    NotInWord,
-    AtPositions(Vec<usize>),
 }
 
 #[derive(Default)]
@@ -209,61 +203,55 @@ impl Hangman {
     pub fn add_clue(&mut self, clue: Clue) -> Result<(), HangmanError> {
         self.add_guessed(clue.letter)?;
 
-        match clue.constraint {
-            LetterConstraint::NotInWord => self
-                .words_remaining
-                .retain(|word| word.chars().find(|c| *c == clue.letter).is_none()),
-            LetterConstraint::AtPositions(idxs) => {
-                self.word_to_guess
-                    .iter_mut()
-                    .enumerate()
-                    .try_for_each(|(idx, letter)| {
-                        if !idxs.contains(&idx) {
-                            return Ok(());
-                        };
+        self.word_to_guess
+            .iter_mut()
+            .enumerate()
+            .try_for_each(|(idx, letter)| {
+                if !clue.at_positions.contains(&idx) {
+                    return Ok(());
+                };
 
-                        if letter.is_none() {
-                            *letter = Some(clue.letter);
-                            return Ok(());
-                        }
-                        // if letter.is_some() && idxs.contains(idx) { return Err(())};
+                if letter.is_none() {
+                    *letter = Some(clue.letter);
+                    return Ok(());
+                }
+                // if letter.is_some() && idxs.contains(idx) { return Err(())};
 
-                        Err(())
-                    })
-                    .map_err(|_| HangmanError::PositionAlreadyOccupied)?;
+                Err(())
+            })
+            .map_err(|_| HangmanError::PositionAlreadyOccupied)?;
 
-                // Multithreaded approach, approx same speed
-                // let mut tmp = vec![];
-                // std::mem::swap(&mut tmp, &mut self.words_remaining);
-                // self.words_remaining = tmp
-                //     .into_par_iter()
-                //     .filter(|word| {
-                //         word.chars()
-                //             .enumerate()
-                //             .find(|(idx, letter)| {
-                //                 let is_same = *letter == clue.letter;
-                //                 let should_be_same = idxs.contains(idx);
+        // Single threaded
+        self.words_remaining.retain(|word| {
+            word.chars()
+                .enumerate()
+                .find(|(idx, letter)| {
+                    let is_same = *letter == clue.letter;
+                    let should_be_same = clue.at_positions.contains(idx);
 
-                //                 return is_same != should_be_same;
-                //             })
-                //             .is_none()
-                //     })
-                //     .collect();
+                    return is_same != should_be_same;
+                })
+                .is_none()
+        });
 
-                // Single threaded
-                self.words_remaining.retain(|word| {
-                    word.chars()
-                        .enumerate()
-                        .find(|(idx, letter)| {
-                            let is_same = *letter == clue.letter;
-                            let should_be_same = idxs.contains(idx);
+        // Multithreaded approach, approx same speed
+        // let mut tmp = vec![];
+        // std::mem::swap(&mut tmp, &mut self.words_remaining);
+        // self.words_remaining = tmp
+        //     .into_par_iter()
+        //     .filter(|word| {
+        //         word.chars()
+        //             .enumerate()
+        //             .find(|(idx, letter)| {
+        //                 let is_same = *letter == clue.letter;
+        //                 let should_be_same = clue.at_positions.contains(idx);
 
-                            return is_same != should_be_same;
-                        })
-                        .is_none()
-                });
-            }
-        }
+        //                 return is_same != should_be_same;
+        //             })
+        //             .is_none()
+        //     })
+        //     .collect();
+
         Ok(())
     }
 
@@ -345,9 +333,7 @@ mod tests {
         {
             let words = vec!["abcd", "aacd", "bbcd"];
             let mut hm = Hangman::with_words(&words, 4);
-            assert!(hm
-                .add_clue(Clue::new('a', LetterConstraint::AtPositions(vec!(0)),))
-                .is_ok());
+            assert!(hm.add_clue(Clue::new('a', vec!(0))).is_ok());
 
             assert_eq!(hm.words_remaining, vec!("abcd"));
         }
@@ -355,9 +341,7 @@ mod tests {
         {
             let words = vec!["abca", "aaca", "aeea", "bbca", "bbcd"];
             let mut hm = Hangman::with_words(&words, 4);
-            assert!(hm
-                .add_clue(Clue::new('a', LetterConstraint::AtPositions(vec!(0, 3))))
-                .is_ok());
+            assert!(hm.add_clue(Clue::new('a', vec!(0, 3))).is_ok());
 
             assert_eq!(hm.words_remaining, vec!("abca", "aeea"));
         }
@@ -368,9 +352,9 @@ mod tests {
         {
             let words = vec!["abcd", "efgh", "ijkl"];
             let mut hm = Hangman::with_words(&words, 4);
-            let _ = hm.add_clue(Clue::new('a', LetterConstraint::AtPositions(vec![0, 1])));
+            let _ = hm.add_clue(Clue::new('a', vec![0, 1]));
             assert!(matches!(
-                hm.add_clue(Clue::new('b', LetterConstraint::AtPositions(vec![1, 2]))),
+                hm.add_clue(Clue::new('b', vec![1, 2])),
                 Err(HangmanError::PositionAlreadyOccupied)
             ))
         }
@@ -381,9 +365,7 @@ mod tests {
         {
             let words = vec!["asdf", "sdfg", "fdsa", "fdss"];
             let mut hm = Hangman::with_words(&words, 4);
-            assert!(hm
-                .add_clue(Clue::new('a', LetterConstraint::NotInWord,))
-                .is_ok());
+            assert!(hm.add_clue(Clue::new('a', vec!())).is_ok());
 
             assert_eq!(hm.words_remaining, vec!("sdfg", "fdss"));
         }
@@ -394,12 +376,10 @@ mod tests {
         {
             let words = vec!["asdf", "sdfg", "fdsa", "fdss"];
             let mut hm = Hangman::with_words(&words, 4);
-            let _ = hm
-                .add_clue(Clue::new('a', LetterConstraint::NotInWord))
-                .is_ok();
+            let _ = hm.add_clue(Clue::new('a', vec![])).is_ok();
 
             assert!(matches!(
-                hm.add_clue(Clue::new('a', LetterConstraint::NotInWord,)),
+                hm.add_clue(Clue::new('a', vec!())),
                 Err(HangmanError::LetterAlreadyGuessed)
             ));
         }
@@ -407,12 +387,10 @@ mod tests {
         {
             let words = vec!["asdf", "sdfg", "fdsa", "fdss"];
             let mut hm = Hangman::with_words(&words, 4);
-            let _ = hm
-                .add_clue(Clue::new('a', LetterConstraint::NotInWord))
-                .is_ok();
+            let _ = hm.add_clue(Clue::new('a', vec![])).is_ok();
 
             assert!(matches!(
-                hm.add_clue(Clue::new('a', LetterConstraint::AtPositions(vec!(0, 1)),)),
+                hm.add_clue(Clue::new('a', vec!(0, 1))),
                 Err(HangmanError::LetterAlreadyGuessed)
             ));
         }
