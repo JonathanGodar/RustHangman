@@ -1,4 +1,10 @@
+// #[macro_use] extern crate rocket;
+
 use rayon::prelude::*;
+use rocket::serde::json::Json;
+use rocket::serde::{Serialize, Deserialize};
+use rocket::tokio::task::{spawn_blocking, JoinError};
+use rocket::{launch, routes, get, post, tokio};
 use sorted_vec::SortedSet;
 use std::time::Instant;
 use std::{
@@ -10,61 +16,107 @@ use std::{
     num::ParseIntError,
 };
 
-fn main() -> Result<(), Box<dyn Error>> {
-    // Naive benchmark
-    let dict_string = std::fs::read_to_string("wordlist.txt")?;
-    let word_list: Vec<&str> = dict_string.lines().collect();
 
-    let mut guesses = vec![];
-    let now = Instant::now();
-    for _ in 0..200 {
-        let mut hm = Hangman::with_words(&word_list, 5_usize);
-        guesses.push(hm.find_best_guess());
-        let _ = hm.add_clue(Clue::new('s', vec![]));
-        guesses.push(hm.find_best_guess());
-        let _ = hm.add_clue(Clue::new('t', vec![]));
-        guesses.push(hm.find_best_guess());
-        let _ = hm.add_clue(Clue::new('a', vec![1, 3]));
-        guesses.push(hm.find_best_guess());
-        let _ = hm.add_clue(Clue::new('u', vec![]));
-        guesses.push(hm.find_best_guess());
-        let _ = hm.add_clue(Clue::new('b', vec![0]));
-        guesses.push(hm.find_best_guess());
-    }
+#[derive(Serialize, Deserialize, Debug)]
+struct Input{
+    vecs: Vec<i32>,
+}
 
-    println!("{guesses:?}, {:?}", now.elapsed());
+#[derive(Serialize, Deserialize, Debug)]
+struct ReturnThing{
+    wow: Option<Vec<String>>,
+}
 
-    let mut uin = std::io::stdin();
-    println!("Hur långt är ditt ord?");
-    let word_len = read_number(&mut uin)?;
-
-    let dict_string = std::fs::read_to_string("wordlist.txt")?;
-    let word_list: Vec<&str> = dict_string.lines().collect();
-    let mut hm = Hangman::with_words(&word_list, word_len as usize);
-
-    loop {
-        let guess = hm.find_best_guess();
-
-        if let Some(guess) = guess {
-            println!("Innehåller ditt ord bosktaven \"{}\"? (y/n)", guess);
-            let word_has_letter = read_bool(&mut uin)?;
-            let positions = if !word_has_letter {
-                vec![]
-            } else {
-                println!("På vilka positioner? (0,1, 2 ...)");
-                read_nums(&mut uin)
-                    .unwrap()
-                    .into_iter()
-                    .map(|v| v as usize)
-                    .collect()
-            };
-            hm.add_clue(Clue::new(guess, positions)).unwrap();
-        } else {
-            todo!("Handle this later");
+#[post("/", data="<input>")]
+async fn index(input: Json<Input>) -> std::io::Result<Json<ReturnThing>> {
+    let a = spawn_blocking(|| 
+        {
+            let mut a = vec![];
+            for i in 0..100000 {
+                a.push(f32::sqrt(i as f32));
+            }
+        
+            return a.into_iter().sum::<f32>();
         }
-        dbg!(&hm.words_remaining);
+    ).await?;
+
+    if input.vecs.len() == 1 {
+        return Ok(Json(ReturnThing {wow: None}));
+    } else {
+        return Ok(Json(ReturnThing {wow: Some(vec![String::from("hello"), a.to_string()])}));
     }
 }
+
+#[launch]
+fn rocket() -> _ {
+    rocket::build().mount("/", routes![index])
+}
+
+
+// fn main() {
+    // for y in (1..7) { for x in (0..y) {
+    //         print!("*");
+    //     }
+    //     println!();
+    //     // println!("{}", y);
+    // }
+
+
+// fn main() -> Result<(), Box<dyn Error>> {
+//     // Naive benchmark
+//     let dict_string = std::fs::read_to_string("wordlist.txt")?;
+//     let word_list: Vec<&str> = dict_string.lines().collect();
+
+//     let mut guesses = vec![];
+//     let now = Instant::now();
+//     for _ in 0..1 {
+//         let mut hm = Hangman::with_words(&word_list, 5_usize);
+//         guesses.push(hm.find_best_guess());
+//         let _ = hm.add_clue(Clue::new('s', vec![]));
+//         guesses.push(hm.find_best_guess());
+//         let _ = hm.add_clue(Clue::new('t', vec![]));
+//         guesses.push(hm.find_best_guess());
+//         let _ = hm.add_clue(Clue::new('a', vec![1, 3]));
+//         guesses.push(hm.find_best_guess());
+//         let _ = hm.add_clue(Clue::new('u', vec![]));
+//         guesses.push(hm.find_best_guess());
+//         let _ = hm.add_clue(Clue::new('b', vec![0]));
+//         guesses.push(hm.find_best_guess());
+//     }
+
+//     println!("{guesses:?}, {:?}", now.elapsed());
+
+//     let mut uin = std::io::stdin();
+//     println!("Hur långt är ditt ord?");
+//     let word_len = read_number(&mut uin)?;
+
+//     let dict_string = std::fs::read_to_string("wordlist.txt")?;
+//     let word_list: Vec<&str> = dict_string.lines().collect();
+//     let mut hm = Hangman::with_words(&word_list, word_len as usize);
+
+//     loop {
+//         let guess = hm.find_best_guess();
+
+//         if let Some(guess) = guess {
+//             println!("Innehåller ditt ord bosktaven \"{}\"? (y/n)", guess);
+//             let word_has_letter = read_bool(&mut uin)?;
+//             let positions = if !word_has_letter {
+//                 vec![]
+//             } else {
+//                 println!("På vilka positioner? (0,1, 2 ...)");
+//                 read_nums(&mut uin)
+//                     .unwrap()
+//                     .into_iter()
+//                     .map(|v| v as usize)
+//                     .collect()
+//             };
+//             hm.add_clue(Clue::new(guess, positions)).unwrap();
+//         } else {
+//             todo!("Handle this later");
+//         }
+//         dbg!(&hm.words_remaining);
+//     }
+// }
 
 fn read_bool(io: &mut Stdin) -> io::Result<bool> {
     let mut input = String::new();
@@ -96,6 +148,7 @@ fn read_nums(io: &mut Stdin) -> io::Result<Vec<i32>> {
         let mut input = String::new();
         io.read_line(&mut input)?;
 
+        input.pop();
         input.pop();
 
         let res: Option<Vec<_>> = input.split(' ').map(|v| v.parse().ok()).collect();
