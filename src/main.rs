@@ -1,11 +1,12 @@
-// #[macro_use] extern crate rocket;
-
 use rayon::prelude::*;
+use rocket::http::Status;
 use rocket::serde::json::Json;
-use rocket::serde::{Serialize, Deserialize};
+use rocket::serde::{Deserialize, Serialize};
 use rocket::tokio::task::{spawn_blocking, JoinError};
-use rocket::{launch, routes, get, post, tokio};
+use rocket::{get, launch, post, routes, tokio, State};
 use sorted_vec::SortedSet;
+use std::io::read_to_string;
+use std::sync::Arc;
 use std::time::Instant;
 use std::{
     cmp::Reverse,
@@ -16,51 +17,104 @@ use std::{
     num::ParseIntError,
 };
 
+use rocket::response::status::Custom;
 
 #[derive(Serialize, Deserialize, Debug)]
-struct Input{
-    vecs: Vec<i32>,
+struct HangmanInput {
+    word_length: usize,
+    clues: Vec<Clue>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct ReturnThing{
-    wow: Option<Vec<String>>,
+struct HangmanOutput {
+    remaining_word_count: usize,
+    words_remaining: Option<Vec<String>>,
+    best_guess: Option<char>,
 }
 
-#[post("/", data="<input>")]
-async fn index(input: Json<Input>) -> std::io::Result<Json<ReturnThing>> {
-    let a = spawn_blocking(|| 
-        {
-            let mut a = vec![];
-            for i in 0..100000 {
-                a.push(f32::sqrt(i as f32));
-            }
-        
-            return a.into_iter().sum::<f32>();
-        }
-    ).await?;
+// #[derive(Serialize, Deserialize, Debug)]
+// struct Input {
+//     vecs: Vec<i32>,
+// }
 
-    if input.vecs.len() == 1 {
-        return Ok(Json(ReturnThing {wow: None}));
-    } else {
-        return Ok(Json(ReturnThing {wow: Some(vec![String::from("hello"), a.to_string()])}));
+// #[derive(Serialize, Deserialize, Debug)]
+// struct ReturnThing {
+//     wow: Option<Vec<String>>,
+// }
+#[post("/hangman", data = "<input>")]
+async fn index(
+    input: Json<HangmanInput>,
+    word_list: &State<Arc<WordList>>,
+) -> Result<Json<HangmanOutput>, Custom<&'static str>> {
+    let word_list = Arc::clone(word_list);
+    // let wow = word_list.shrink_to
+    let a = spawn_blocking(move || {
+        let mut hm = Hangman::with_words(&word_list, input.word_length);
+        input.clues.iter().for_each(|c| {
+            hm.add_clue(c).unwrap();
+        });
+
+        return (hm.find_best_guess(), hm.words_remaining);
+        // let Hangman { guessed, words_remaining, word_to_guess }
+        // let mut a = vec![];
+        // for i in 0..100000 {
+        //     a.push(f32::sqrt(i as f32));
+        // }
+
+        // // panic!();
+        // return a.into_iter().sum::<f32>();
+    })
+    .await
+    .map_err(|_| Custom(Status::InternalServerError, "Ajrå"))?;
+
+    // if input.vecs.len() == 1 {
+    //     return Ok(Json(ReturnThing { wow: None }));
+    // } else {
+    //     return Ok(Json(ReturnThing {
+    //         wow: Some(vec![String::from("hello"), a.to_string()]),
+    //     }));
+    // }
+    return Ok(Json(HangmanOutput {
+        remaining_word_count: a.1.len(),
+        words_remaining: if a.1.len() < 50 { Some(a.1) } else { None },
+        best_guess: a.0,
+    }));
+    // return Ok(word_list.0.len().to_string());
+    // todo!()
+}
+
+#[derive()]
+struct WordList(Vec<String>);
+impl std::ops::Deref for WordList {
+    type Target = Vec<String>;
+
+    fn deref(&self) -> &Self::Target {
+        return &self.0;
     }
 }
 
 #[launch]
 fn rocket() -> _ {
-    rocket::build().mount("/", routes![index])
+    let cors = CorsOptions::default().allowed_origins(AllowedOrigins::all());
+    let wordlist = WordList(
+        std::fs::read_to_string("wordlist.txt")
+            .unwrap()
+            .lines()
+            .map(ToOwned::to_owned)
+            .collect(),
+    );
+    rocket::build()
+        .mount("/", routes![index])
+        .manage(Arc::new(wordlist))
 }
 
-
 // fn main() {
-    // for y in (1..7) { for x in (0..y) {
-    //         print!("*");
-    //     }
-    //     println!();
-    //     // println!("{}", y);
-    // }
-
+// for y in (1..7) { for x in (0..y) {
+//         print!("*");
+//     }
+//     println!();
+//     // println!("{}", y);
+// }
 
 // fn main() -> Result<(), Box<dyn Error>> {
 //     // Naive benchmark
@@ -167,6 +221,7 @@ struct Hangman {
     word_to_guess: Vec<Option<char>>,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
 struct Clue {
     letter: char,
     at_positions: Vec<usize>,
@@ -222,11 +277,12 @@ enum HangmanError {
 }
 
 impl Hangman {
-    pub fn with_words(words: &Vec<&str>, word_len: usize) -> Self {
+    pub fn with_words<T: AsRef<str>>(words: &Vec<T>, word_len: usize) -> Self {
         let words_remaining = words
-            .par_iter()
-            .filter(|s| s.chars().count() == word_len)
-            .map(|s| s.trim().to_ascii_lowercase())
+            .iter()
+            // .par_iter()
+            .filter(|s| s.as_ref().chars().count() == word_len)
+            .map(|s| s.as_ref().trim().to_ascii_lowercase())
             .collect();
 
         Hangman {
@@ -253,7 +309,7 @@ impl Hangman {
         best_guess
     }
 
-    pub fn add_clue(&mut self, clue: Clue) -> Result<(), HangmanError> {
+    pub fn add_clue(&mut self, clue: &Clue) -> Result<(), HangmanError> {
         self.add_guessed(clue.letter)?;
 
         self.word_to_guess
